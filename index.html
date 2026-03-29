@@ -24,9 +24,7 @@
     textarea { resize: vertical; }
     button { -webkit-tap-highlight-color: transparent; }
     input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(0.7); }
-    /* Prevent iOS zoom on input focus */
     input, textarea, select { font-size: 16px !important; }
-    /* Scrollbar */
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
@@ -43,9 +41,8 @@
     const { useState, useEffect, useCallback, useMemo } = React;
 
     // ═════════════════════════════════════════════════════════════
-    // YOUR APPS SCRIPT URL
-    // ═════════════════════════════════════════════════════════════
     const API = "https://script.google.com/macros/s/AKfycbz55Pm_L_y5FQsZtVkbtaqJMzOUcm7jNeQW5neGD9VvZoiDb-Kg9EYGBOGc8P0B4n_7/exec";
+    // ═════════════════════════════════════════════════════════════
 
     const MAX_ENDS = 18;
     const MAX_AISLES = 12;
@@ -72,34 +69,36 @@
       dt.setDate(1);
       return toISO(dt);
     }
+    function normalizeDate(d) {
+      if (typeof d === "string" && d.length > 10) return d.slice(0, 10);
+      return String(d);
+    }
 
     function calcScore(w) {
-      const endScore = MAX_ENDS - (w.endsMissed || 0);
-      const aisleScore = MAX_AISLES - (w.aislesMissed || 0);
-      const metroDeduct = w.metroMissed || 0;
+      const em = (w.endsDetail || []).length;
+      const am = (w.aislesDetail || []).length;
+      const mm = (w.metroDetail || []).length;
+      const endScore = MAX_ENDS - em;
+      const aisleScore = MAX_AISLES - am;
       const miscDeduct = (w.misc || []).filter(m => m.active).length;
-      const total = endScore + aisleScore - metroDeduct - miscDeduct;
+      const total = endScore + aisleScore - mm - miscDeduct;
       return {
-        endScore, aisleScore,
+        endScore, aisleScore, endsMissed: em, aislesMissed: am, metroMissed: mm,
         endPct: Math.round((endScore / MAX_ENDS) * 100),
         aislePct: Math.round((aisleScore / MAX_AISLES) * 100),
-        metroDeduct, miscDeduct, total,
+        metroDeduct: mm, miscDeduct, total,
         pct: Math.round((total / BASE_MAX) * 100),
       };
     }
 
     // ─── API ─────────────────────────────────────────────────────
-    async function apiGet() {
-      const res = await fetch(API);
-      return res.json();
-    }
+    async function apiGet() { return (await fetch(API)).json(); }
     async function apiPost(payload) {
-      const res = await fetch(API, {
+      return (await fetch(API, {
         method: "POST",
         headers: { "Content-Type": "text/plain;charset=utf-8" },
         body: JSON.stringify(payload),
-      });
-      return res.json();
+      })).json();
     }
 
     // ─── Colors ──────────────────────────────────────────────────
@@ -116,27 +115,51 @@
       return "rgba(239,68,68,0.12)";
     }
 
-    // ─── Stepper ─────────────────────────────────────────────────
-    const SB = {
-      width: 48, height: 48, borderRadius: 10, border: "1px solid #334155",
-      background: "#1e293b", color: "#e2e8f0", fontSize: 22, fontWeight: 700,
-      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
-    };
-    function Stepper({ label, value, onChange, min = 0, max = 99 }) {
+    // ─── MissList: add misses with per-item notes ────────────────
+    function MissList({ items, onChange, max, addLabel }) {
+      const canAdd = !max || items.length < max;
+      function add() {
+        if (canAdd) onChange([...items, { note: "" }]);
+      }
+      function remove(i) {
+        onChange(items.filter((_, idx) => idx !== i));
+      }
+      function update(i, note) {
+        const n = [...items]; n[i] = { note }; onChange(n);
+      }
       return (
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span style={{ fontSize: 13, color: "#94a3b8", minWidth: 48, fontWeight: 500 }}>{label}</span>
-          <button onClick={() => onChange(Math.max(min, value - 1))} style={SB}>−</button>
-          <span style={{
-            fontSize: 26, fontWeight: 700, minWidth: 40, textAlign: "center",
-            color: "#e2e8f0", fontFamily: "'IBM Plex Mono', monospace",
-          }}>{value}</span>
-          <button onClick={() => onChange(Math.min(max, value + 1))} style={SB}>+</button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {items.map((item, i) => (
+            <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#ef4444", minWidth: 20, fontFamily: "'IBM Plex Mono', monospace" }}>{i + 1}</span>
+              <input
+                placeholder="Which one? (optional)"
+                value={item.note}
+                onChange={e => update(i, e.target.value)}
+                style={{ ...TA, flex: 1, padding: "8px 10px" }}
+              />
+              <button onClick={() => remove(i)} style={{
+                width: 32, height: 32, minWidth: 32, borderRadius: 6,
+                border: "1px solid #7f1d1d", background: "rgba(239,68,68,0.08)",
+                color: "#ef4444", fontSize: 16, fontWeight: 700, cursor: "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center",
+              }}>&times;</button>
+            </div>
+          ))}
+          {canAdd && (
+            <button onClick={add} style={{
+              padding: "10px 0", borderRadius: 8, border: "1px dashed #334155",
+              background: "transparent", color: "#64748b", fontSize: 13, fontWeight: 600,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            }}>
+              <span style={{ fontSize: 18, lineHeight: 1 }}>+</span> {addLabel || "Add miss"}
+            </button>
+          )}
         </div>
       );
     }
 
-    // ─── Score Ring ──────────────────────────────────────────────
+    // ─── ScoreRing ───────────────────────────────────────────────
     function ScoreRing({ pct, size = 90, stroke = 7, label }) {
       const r = (size - stroke) / 2;
       const circ = 2 * Math.PI * r;
@@ -151,8 +174,8 @@
                 strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
                 style={{ transition: "stroke-dashoffset 0.5s ease" }} />
             </svg>
-            <div style={{ position:"absolute", top:0, left:0, width:"100%", height:"100%", display:"flex", alignItems:"center", justifyContent:"center" }}>
-              <span style={{ fontSize: size*0.28, fontWeight: 800, color, fontFamily: "'IBM Plex Mono', monospace" }}>{pct}%</span>
+            <div style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <span style={{ fontSize: size * 0.28, fontWeight: 800, color, fontFamily: "'IBM Plex Mono', monospace" }}>{pct}%</span>
             </div>
           </div>
           {label && <span style={{ fontSize: 10, color: "#64748b", textTransform: "uppercase", letterSpacing: 1.2, fontWeight: 600 }}>{label}</span>}
@@ -163,8 +186,8 @@
     function MiniBar({ pct, h = 6 }) {
       const c = Math.max(0, Math.min(100, pct));
       return (
-        <div style={{ width:"100%", height:h, borderRadius:h/2, background:"#1e293b", overflow:"hidden" }}>
-          <div style={{ width:`${c}%`, height:"100%", borderRadius:h/2, background:pc(pct), transition:"width 0.4s ease" }} />
+        <div style={{ width: "100%", height: h, borderRadius: h / 2, background: "#1e293b", overflow: "hidden" }}>
+          <div style={{ width: `${c}%`, height: "100%", borderRadius: h / 2, background: pc(pct), transition: "width 0.4s ease" }} />
         </div>
       );
     }
@@ -174,7 +197,7 @@
       const e = status.type === "error";
       return (
         <div style={{
-          padding:"8px 14px", borderRadius:8, fontSize:12, fontWeight:600, margin:"8px 16px 0",
+          padding: "8px 14px", borderRadius: 8, fontSize: 12, fontWeight: 600, margin: "8px 16px 0",
           background: e ? "rgba(239,68,68,0.12)" : "rgba(34,197,94,0.12)",
           color: e ? "#ef4444" : "#22c55e",
         }}>{status.msg}</div>
@@ -191,103 +214,110 @@
       const [saving, setSaving] = useState(false);
       const [status, setStatus] = useState(null);
 
+      // Walk form
       const [walkId, setWalkId] = useState(null);
       const [walkDate, setWalkDate] = useState(today());
-      const [endsMissed, setEndsMissed] = useState(0);
-      const [endsComment, setEndsComment] = useState("");
-      const [metroMissed, setMetroMissed] = useState(0);
-      const [metroComment, setMetroComment] = useState("");
-      const [aislesMissed, setAislesMissed] = useState(0);
-      const [aislesComment, setAislesComment] = useState("");
+      const [closedBy, setClosedBy] = useState("");
+      const [endsDetail, setEndsDetail] = useState([]);
+      const [metroDetail, setMetroDetail] = useState([]);
+      const [aislesDetail, setAislesDetail] = useState([]);
       const [misc, setMisc] = useState([
-        { id:"m1", active:false, text:"" },
-        { id:"m2", active:false, text:"" },
-        { id:"m3", active:false, text:"" },
+        { id: "m1", active: false, text: "" },
+        { id: "m2", active: false, text: "" },
+        { id: "m3", active: false, text: "" },
       ]);
 
+      // Dashboard
       const [filterMode, setFilterMode] = useState("all");
       const [filterDate, setFilterDate] = useState(today());
       const [filterStart, setFilterStart] = useState(today());
       const [filterEnd, setFilterEnd] = useState(today());
       const [detailId, setDetailId] = useState(null);
 
-      // ─── Load ──────────────────────────────────────────────────
       const fetchWalks = useCallback(async () => {
         try {
           const data = await apiGet();
           if (data.success) {
-            // Normalize dates - Sheets may return Date objects or ISO strings
-            const normalized = (data.walks || []).map(w => ({
+            setWalks((data.walks || []).map(w => ({
               ...w,
-              date: typeof w.date === "string" && w.date.length > 10 ? w.date.slice(0, 10) : String(w.date),
-            }));
-            setWalks(normalized);
+              date: normalizeDate(w.date),
+              endsDetail: w.endsDetail || [],
+              metroDetail: w.metroDetail || [],
+              aislesDetail: w.aislesDetail || [],
+            })));
+          } else {
+            setStatus({ type: "error", msg: "Load failed: " + (data.error || "unknown") });
           }
-          else setStatus({ type:"error", msg:"Load failed: " + (data.error || "unknown") });
         } catch (err) {
-          setStatus({ type:"error", msg:"Network error: " + err.message });
+          setStatus({ type: "error", msg: "Network error: " + err.message });
         } finally { setLoaded(true); }
       }, []);
 
       useEffect(() => { fetchWalks(); }, [fetchWalks]);
 
       function resetWalk() {
-        setWalkId(null); setWalkDate(today()); setEndsMissed(0); setEndsComment("");
-        setMetroMissed(0); setMetroComment(""); setAislesMissed(0); setAislesComment("");
-        setMisc([{ id:"m1",active:false,text:"" },{ id:"m2",active:false,text:"" },{ id:"m3",active:false,text:"" }]);
+        setWalkId(null); setWalkDate(today()); setClosedBy("");
+        setEndsDetail([]); setMetroDetail([]); setAislesDetail([]);
+        setMisc([{ id: "m1", active: false, text: "" }, { id: "m2", active: false, text: "" }, { id: "m3", active: false, text: "" }]);
       }
 
       async function saveWalk() {
         setSaving(true); setStatus(null);
-        const walk = { id: walkId || undefined, date: walkDate, endsMissed, endsComment, metroMissed, metroComment, aislesMissed, aislesComment, misc };
+        const walk = {
+          id: walkId || undefined,
+          date: walkDate, closedBy,
+          endsDetail, metroDetail, aislesDetail, misc,
+        };
         try {
           const res = await apiPost({ action: walkId ? "update" : "add", walk });
           if (res.success) {
-            setStatus({ type:"ok", msg: walkId ? "Walk updated." : "Walk saved." });
+            setStatus({ type: "ok", msg: walkId ? "Walk updated." : "Walk saved." });
             resetWalk(); await fetchWalks(); setTab("history");
           } else {
-            setStatus({ type:"error", msg:"Save failed: " + (res.error || "unknown") });
+            setStatus({ type: "error", msg: "Save failed: " + (res.error || "unknown") });
           }
         } catch (err) {
-          setStatus({ type:"error", msg:"Network error: " + err.message });
+          setStatus({ type: "error", msg: "Network error: " + err.message });
         } finally { setSaving(false); }
       }
 
       async function deleteWalk(id) {
         setSaving(true);
         try {
-          const res = await apiPost({ action:"delete", id });
-          if (res.success) { setStatus({ type:"ok", msg:"Deleted." }); setDetailId(null); await fetchWalks(); }
-          else setStatus({ type:"error", msg:"Delete failed: " + (res.error || "unknown") });
+          const res = await apiPost({ action: "delete", id });
+          if (res.success) { setStatus({ type: "ok", msg: "Deleted." }); setDetailId(null); await fetchWalks(); }
+          else setStatus({ type: "error", msg: "Delete failed: " + (res.error || "unknown") });
         } catch (err) {
-          setStatus({ type:"error", msg:"Network error: " + err.message });
+          setStatus({ type: "error", msg: "Network error: " + err.message });
         } finally { setSaving(false); }
       }
 
       function editWalk(w) {
-        setWalkId(w.id); setWalkDate(w.date); setEndsMissed(w.endsMissed);
-        setEndsComment(w.endsComment || ""); setMetroMissed(w.metroMissed);
-        setMetroComment(w.metroComment || ""); setAislesMissed(w.aislesMissed);
-        setAislesComment(w.aislesComment || "");
-        setMisc(w.misc || [{ id:"m1",active:false,text:"" },{ id:"m2",active:false,text:"" },{ id:"m3",active:false,text:"" }]);
+        setWalkId(w.id); setWalkDate(w.date); setClosedBy(w.closedBy || "");
+        setEndsDetail(w.endsDetail || []); setMetroDetail(w.metroDetail || []);
+        setAislesDetail(w.aislesDetail || []);
+        setMisc(w.misc || [{ id: "m1", active: false, text: "" }, { id: "m2", active: false, text: "" }, { id: "m3", active: false, text: "" }]);
         setTab("walk");
       }
 
-      const ls = calcScore({ endsMissed, aislesMissed, metroMissed, misc });
+      // Live score from current form
+      const lw = { endsDetail, metroDetail, aislesDetail, misc };
+      const ls = calcScore(lw);
 
+      // Dashboard filtering
       const filtered = useMemo(() => {
         if (filterMode === "all") return walks;
         if (filterMode === "day") return walks.filter(w => w.date === filterDate);
         if (filterMode === "range") return walks.filter(w => w.date >= filterStart && w.date <= filterEnd);
         if (filterMode === "week") {
           const ws = startOfWeek(filterDate);
-          const we = toISO(new Date(new Date(ws+"T12:00:00").getTime() + 6*86400000));
+          const we = toISO(new Date(new Date(ws + "T12:00:00").getTime() + 6 * 86400000));
           return walks.filter(w => w.date >= ws && w.date <= we);
         }
         if (filterMode === "month") {
           const ms = startOfMonth(filterDate);
-          const d = new Date(ms+"T12:00:00");
-          const me = toISO(new Date(d.getFullYear(), d.getMonth()+1, 0));
+          const d = new Date(ms + "T12:00:00");
+          const me = toISO(new Date(d.getFullYear(), d.getMonth() + 1, 0));
           return walks.filter(w => w.date >= ms && w.date <= me);
         }
         return walks;
@@ -297,20 +327,56 @@
         if (!filtered.length) return null;
         const sc = filtered.map(w => calcScore(w));
         return {
-          avg: Math.round(sc.reduce((s,x) => s+x.pct, 0)/sc.length),
-          best: Math.max(...sc.map(x=>x.pct)),
-          worst: Math.min(...sc.map(x=>x.pct)),
-          avgEnd: Math.round(sc.reduce((s,x) => s+x.endPct, 0)/sc.length),
-          avgAisle: Math.round(sc.reduce((s,x) => s+x.aislePct, 0)/sc.length),
-          totalMetro: sc.reduce((s,x) => s+x.metroDeduct, 0),
-          totalMisc: sc.reduce((s,x) => s+x.miscDeduct, 0),
+          avg: Math.round(sc.reduce((s, x) => s + x.pct, 0) / sc.length),
+          best: Math.max(...sc.map(x => x.pct)),
+          worst: Math.min(...sc.map(x => x.pct)),
+          avgEnd: Math.round(sc.reduce((s, x) => s + x.endPct, 0) / sc.length),
+          avgAisle: Math.round(sc.reduce((s, x) => s + x.aislePct, 0) / sc.length),
+          totalMetro: sc.reduce((s, x) => s + x.metroDeduct, 0),
+          totalMisc: sc.reduce((s, x) => s + x.miscDeduct, 0),
           count: filtered.length,
         };
       }, [filtered]);
 
+      // ─── Frequent misses analysis ─────────────────────────────
+      const freqMisses = useMemo(() => {
+        if (!filtered.length) return null;
+        const counts = {};
+        filtered.forEach(w => {
+          ["endsDetail", "metroDetail", "aislesDetail"].forEach(key => {
+            (w[key] || []).forEach(m => {
+              const note = (m.note || "").trim().toLowerCase();
+              if (note) {
+                const label = key === "endsDetail" ? "End" : key === "metroDetail" ? "Metro" : "Aisle";
+                const k = label + ": " + note;
+                counts[k] = (counts[k] || 0) + 1;
+              }
+            });
+          });
+        });
+        const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 8);
+        return sorted.length ? sorted : null;
+      }, [filtered]);
+
+      // ─── Closer breakdown ─────────────────────────────────────
+      const closerStats = useMemo(() => {
+        if (!filtered.length) return null;
+        const byCloser = {};
+        filtered.forEach(w => {
+          const name = (w.closedBy || "").trim() || "Unknown";
+          if (!byCloser[name]) byCloser[name] = { walks: 0, totalPct: 0 };
+          const s = calcScore(w);
+          byCloser[name].walks++;
+          byCloser[name].totalPct += s.pct;
+        });
+        return Object.entries(byCloser).map(([name, d]) => ({
+          name, walks: d.walks, avg: Math.round(d.totalPct / d.walks),
+        })).sort((a, b) => b.walks - a.walks);
+      }, [filtered]);
+
       if (!loaded) {
-        return <div style={{ ...SH, display:"flex", alignItems:"center", justifyContent:"center", height:"100vh" }}>
-          <span style={{ color:"#64748b" }}>Loading from Sheets...</span>
+        return <div style={{ ...SH, display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
+          <span style={{ color: "#64748b" }}>Loading from Sheets...</span>
         </div>;
       }
 
@@ -319,122 +385,137 @@
       return (
         <div style={SH}>
           {/* Header */}
-          <div style={{ padding:"16px 16px 0", display:"flex", alignItems:"center", justifyContent:"space-between", flexShrink:0 }}>
+          <div style={{ padding: "16px 16px 0", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
             <div>
-              <h1 style={{ fontSize:17, fontWeight:800, color:"#e2e8f0", margin:0, letterSpacing:"-0.02em", fontFamily:"'IBM Plex Mono', monospace" }}>MORNING WALK</h1>
-              <span style={{ fontSize:10, color:"#475569", letterSpacing:1.5, textTransform:"uppercase", fontWeight:600 }}>Department Evaluation</span>
+              <h1 style={{ fontSize: 17, fontWeight: 800, color: "#e2e8f0", margin: 0, letterSpacing: "-0.02em", fontFamily: "'IBM Plex Mono', monospace" }}>MORNING WALK</h1>
+              <span style={{ fontSize: 10, color: "#475569", letterSpacing: 1.5, textTransform: "uppercase", fontWeight: 600 }}>Department Evaluation</span>
             </div>
             {tab === "walk" && (
-              <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
-                <span style={{ fontSize:30, fontWeight:900, color:pc(ls.pct), fontFamily:"'IBM Plex Mono', monospace", lineHeight:1 }}>{ls.total}/{BASE_MAX}</span>
-                <span style={{ fontSize:11, color:pc(ls.pct), fontFamily:"'IBM Plex Mono', monospace" }}>{ls.pct}%</span>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <span style={{ fontSize: 30, fontWeight: 900, color: pc(ls.pct), fontFamily: "'IBM Plex Mono', monospace", lineHeight: 1 }}>{ls.total}/{BASE_MAX}</span>
+                <span style={{ fontSize: 11, color: pc(ls.pct), fontFamily: "'IBM Plex Mono', monospace" }}>{ls.pct}%</span>
               </div>
             )}
           </div>
 
           {/* Tabs */}
-          <div style={{ display:"flex", padding:"12px 16px 0", borderBottom:"1px solid #1e293b", flexShrink:0 }}>
-            {[["walk","New Walk"],["history","History"],["dashboard","Dashboard"]].map(([k,l]) => (
+          <div style={{ display: "flex", padding: "12px 16px 0", borderBottom: "1px solid #1e293b", flexShrink: 0 }}>
+            {[["walk", "New Walk"], ["history", "History"], ["dashboard", "Dashboard"]].map(([k, l]) => (
               <button key={k} onClick={() => { setTab(k); setDetailId(null); setStatus(null); }}
-                style={{ flex:1, padding:"8px 0 10px", border:"none", borderBottom: tab===k ? "2px solid #3b82f6" : "2px solid transparent",
-                  background:"none", color: tab===k ? "#e2e8f0" : "#64748b", fontSize:13, fontWeight:600, cursor:"pointer" }}>{l}</button>
+                style={{ flex: 1, padding: "8px 0 10px", border: "none", borderBottom: tab === k ? "2px solid #3b82f6" : "2px solid transparent",
+                  background: "none", color: tab === k ? "#e2e8f0" : "#64748b", fontSize: 13, fontWeight: 600, cursor: "pointer" }}>{l}</button>
             ))}
           </div>
 
           <StatusBanner status={status} />
 
-          <div style={{ flex:1, overflow:"auto", WebkitOverflowScrolling:"touch" }}>
+          <div style={{ flex: 1, overflow: "auto", WebkitOverflowScrolling: "touch" }}>
 
-            {/* ─── WALK ──────────────────────────────────────── */}
+            {/* ─── NEW WALK ─────────────────────────────────── */}
             {tab === "walk" && (
-              <div style={{ padding:16, display:"flex", flexDirection:"column", gap:16 }}>
+              <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 16 }}>
+                {/* Date & Closer */}
                 <div style={CD}>
-                  <label style={LB}>Walk Date</label>
-                  <input type="date" value={walkDate} onChange={e => setWalkDate(e.target.value)} style={DI} />
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={LB}>Walk Date</label>
+                      <input type="date" value={walkDate} onChange={e => setWalkDate(e.target.value)} style={{ ...DI, width: "100%" }} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={LB}>Who Closed</label>
+                      <input placeholder="Name..." value={closedBy} onChange={e => setClosedBy(e.target.value)} style={{ ...DI, width: "100%" }} />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Endcaps */}
                 <div style={CD}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                     <span style={ST}>Endcaps</span>
-                    <span style={{ ...TG, background:pbg(ls.endPct), color:pc(ls.endPct) }}>{ls.endScore}/{MAX_ENDS} &middot; {ls.endPct}%</span>
+                    <span style={{ ...TG, background: pbg(ls.endPct), color: pc(ls.endPct) }}>
+                      {ls.endScore}/{MAX_ENDS} &middot; {ls.endPct}%
+                    </span>
                   </div>
-                  <Stepper label="Missed" value={endsMissed} onChange={setEndsMissed} max={MAX_ENDS} />
                   <MiniBar pct={ls.endPct} />
-                  <textarea placeholder="Endcap comments..." value={endsComment} onChange={e => setEndsComment(e.target.value)} style={TA} rows={2} />
+                  <MissList items={endsDetail} onChange={setEndsDetail} max={MAX_ENDS} addLabel="Add missed endcap" />
                 </div>
 
                 {/* Metro */}
                 <div style={CD}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                     <span style={ST}>Metro & Side Stacks</span>
-                    <span style={{ ...TG, background: metroMissed>0 ? "rgba(239,68,68,0.12)" : "rgba(34,197,94,0.12)", color: metroMissed>0 ? "#ef4444" : "#22c55e" }}>−{metroMissed} pts</span>
+                    <span style={{ ...TG, background: ls.metroDeduct > 0 ? "rgba(239,68,68,0.12)" : "rgba(34,197,94,0.12)", color: ls.metroDeduct > 0 ? "#ef4444" : "#22c55e" }}>
+                      &minus;{ls.metroDeduct} pts
+                    </span>
                   </div>
-                  <Stepper label="Missed" value={metroMissed} onChange={setMetroMissed} />
-                  <textarea placeholder="Metro/side stack comments..." value={metroComment} onChange={e => setMetroComment(e.target.value)} style={TA} rows={2} />
+                  <MissList items={metroDetail} onChange={setMetroDetail} addLabel="Add missed display" />
                 </div>
 
                 {/* Aisles */}
                 <div style={CD}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
                     <span style={ST}>Aisles</span>
-                    <span style={{ ...TG, background:pbg(ls.aislePct), color:pc(ls.aislePct) }}>{ls.aisleScore}/{MAX_AISLES} &middot; {ls.aislePct}%</span>
+                    <span style={{ ...TG, background: pbg(ls.aislePct), color: pc(ls.aislePct) }}>
+                      {ls.aisleScore}/{MAX_AISLES} &middot; {ls.aislePct}%
+                    </span>
                   </div>
-                  <Stepper label="Missed" value={aislesMissed} onChange={setAislesMissed} max={MAX_AISLES} />
                   <MiniBar pct={ls.aislePct} />
-                  <textarea placeholder="Aisle comments..." value={aislesComment} onChange={e => setAislesComment(e.target.value)} style={TA} rows={2} />
+                  <MissList items={aislesDetail} onChange={setAislesDetail} max={MAX_AISLES} addLabel="Add missed aisle" />
                 </div>
 
                 {/* Misc */}
                 <div style={CD}>
                   <span style={ST}>Misc Deductions</span>
-                  <span style={{ fontSize:11, color:"#64748b", marginBottom:8, display:"block" }}>Each marked = −1 pt</span>
-                  {misc.map((m,i) => (
-                    <div key={m.id} style={{ display:"flex", gap:8, alignItems:"flex-start", marginBottom:8 }}>
-                      <button onClick={() => { const n=[...misc]; n[i]={...n[i], active:!n[i].active}; setMisc(n); }}
+                  <span style={{ fontSize: 11, color: "#64748b", marginBottom: 8, display: "block" }}>Each marked = &minus;1 pt</span>
+                  {misc.map((m, i) => (
+                    <div key={m.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 8 }}>
+                      <button onClick={() => { const n = [...misc]; n[i] = { ...n[i], active: !n[i].active }; setMisc(n); }}
                         style={{
-                          width:44, height:44, minWidth:44, borderRadius:8,
+                          width: 44, height: 44, minWidth: 44, borderRadius: 8,
                           border: m.active ? "2px solid #ef4444" : "1px solid #334155",
                           background: m.active ? "rgba(239,68,68,0.15)" : "#1e293b",
-                          color: m.active ? "#ef4444" : "#475569", fontSize:16, fontWeight:700,
-                          cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
-                        }}>{m.active ? "−1" : (i+1)}</button>
-                      <input placeholder={`Misc note ${i+1}...`} value={m.text}
-                        onChange={e => { const n=[...misc]; n[i]={...n[i], text:e.target.value}; setMisc(n); }}
-                        style={{ ...TA, flex:1, padding:"10px 12px" }} />
+                          color: m.active ? "#ef4444" : "#475569", fontSize: 16, fontWeight: 700,
+                          cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center",
+                        }}>{m.active ? "\u22121" : (i + 1)}</button>
+                      <input placeholder={`Misc note ${i + 1}...`} value={m.text}
+                        onChange={e => { const n = [...misc]; n[i] = { ...n[i], text: e.target.value }; setMisc(n); }}
+                        style={{ ...TA, flex: 1, padding: "10px 12px" }} />
                     </div>
                   ))}
                 </div>
 
-                <div style={{ display:"flex", gap:10 }}>
-                  <button onClick={saveWalk} disabled={saving} style={{ ...PB, opacity: saving?0.5:1 }}>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button onClick={saveWalk} disabled={saving} style={{ ...PB, opacity: saving ? 0.5 : 1 }}>
                     {saving ? "Saving..." : walkId ? "Update Walk" : "Save Walk"}
                   </button>
                   {walkId && <button onClick={resetWalk} style={SBT}>Cancel</button>}
                 </div>
-                <div style={{ height:40 }} />
+                <div style={{ height: 40 }} />
               </div>
             )}
 
-            {/* ─── HISTORY ───────────────────────────────────── */}
+            {/* ─── HISTORY ─────────────────────────────────── */}
             {tab === "history" && (
-              <div style={{ padding:16, display:"flex", flexDirection:"column", gap:8 }}>
-                {walks.length === 0 && <div style={{ color:"#64748b", textAlign:"center", padding:40 }}>No walks yet.</div>}
+              <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 8 }}>
+                {walks.length === 0 && <div style={{ color: "#64748b", textAlign: "center", padding: 40 }}>No walks yet.</div>}
                 {dw ? (
                   <WalkDetail walk={dw} onBack={() => setDetailId(null)} onEdit={() => editWalk(dw)} onDelete={() => deleteWalk(dw.id)} saving={saving} />
                 ) : (
-                  [...walks].sort((a,b) => b.date.localeCompare(a.date) || (b.savedAt||"").localeCompare(a.savedAt||"")).map(w => {
+                  [...walks].sort((a, b) => b.date.localeCompare(a.date) || (b.savedAt || "").localeCompare(a.savedAt || "")).map(w => {
                     const s = calcScore(w);
                     return (
                       <button key={w.id} onClick={() => setDetailId(w.id)} style={HR}>
-                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                          <span style={{ fontSize:13, fontWeight:600, color:"#e2e8f0" }}>{fmt(w.date)}</span>
-                          <span style={{ fontSize:18, fontWeight:800, color:pc(s.pct), fontFamily:"'IBM Plex Mono', monospace" }}>{s.total}/{BASE_MAX}</span>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <div>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{fmt(w.date)}</span>
+                            {w.closedBy && <span style={{ fontSize: 11, color: "#64748b", marginLeft: 8 }}>Closed: {w.closedBy}</span>}
+                          </div>
+                          <span style={{ fontSize: 18, fontWeight: 800, color: pc(s.pct), fontFamily: "'IBM Plex Mono', monospace" }}>{s.total}/{BASE_MAX}</span>
                         </div>
-                        <div style={{ display:"flex", gap:10, marginTop:4, fontSize:11, color:"#64748b" }}>
+                        <div style={{ display: "flex", gap: 10, marginTop: 4, fontSize: 11, color: "#64748b" }}>
                           <span>Ends {s.endPct}%</span><span>Aisles {s.aislePct}%</span>
-                          {s.metroDeduct>0 && <span style={{color:"#ef4444"}}>Metro −{s.metroDeduct}</span>}
-                          {s.miscDeduct>0 && <span style={{color:"#ef4444"}}>Misc −{s.miscDeduct}</span>}
+                          {s.metroDeduct > 0 && <span style={{ color: "#ef4444" }}>Metro &minus;{s.metroDeduct}</span>}
+                          {s.miscDeduct > 0 && <span style={{ color: "#ef4444" }}>Misc &minus;{s.miscDeduct}</span>}
                         </div>
                         <MiniBar pct={s.pct} h={4} />
                       </button>
@@ -444,57 +525,89 @@
               </div>
             )}
 
-            {/* ─── DASHBOARD ─────────────────────────────────── */}
+            {/* ─── DASHBOARD ───────────────────────────────── */}
             {tab === "dashboard" && (
-              <div style={{ padding:16, display:"flex", flexDirection:"column", gap:14 }}>
+              <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 14 }}>
                 <div style={CD}>
-                  <div style={{ display:"flex", flexWrap:"wrap", gap:6, marginBottom:8 }}>
-                    {[["all","All"],["day","Day"],["range","Range"],["week","Week"],["month","Month"]].map(([k,l]) => (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                    {[["all", "All"], ["day", "Day"], ["range", "Range"], ["week", "Week"], ["month", "Month"]].map(([k, l]) => (
                       <button key={k} onClick={() => setFilterMode(k)} style={{
-                        padding:"5px 12px", borderRadius:6, border: filterMode===k ? "1px solid #3b82f6" : "1px solid #334155",
-                        background: filterMode===k ? "rgba(59,130,246,0.15)" : "#0f172a",
-                        color: filterMode===k ? "#60a5fa" : "#94a3b8", fontSize:12, fontWeight:600, cursor:"pointer",
+                        padding: "5px 12px", borderRadius: 6, border: filterMode === k ? "1px solid #3b82f6" : "1px solid #334155",
+                        background: filterMode === k ? "rgba(59,130,246,0.15)" : "#0f172a",
+                        color: filterMode === k ? "#60a5fa" : "#94a3b8", fontSize: 12, fontWeight: 600, cursor: "pointer",
                       }}>{l}</button>
                     ))}
                   </div>
-                  {(filterMode==="day"||filterMode==="week"||filterMode==="month") && (
+                  {(filterMode === "day" || filterMode === "week" || filterMode === "month") && (
                     <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={DI} />
                   )}
-                  {filterMode==="range" && (
-                    <div style={{ display:"flex", gap:8, alignItems:"center" }}>
-                      <input type="date" value={filterStart} onChange={e => setFilterStart(e.target.value)} style={{...DI, flex:1}} />
-                      <span style={{ color:"#475569", fontSize:12 }}>to</span>
-                      <input type="date" value={filterEnd} onChange={e => setFilterEnd(e.target.value)} style={{...DI, flex:1}} />
+                  {filterMode === "range" && (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <input type="date" value={filterStart} onChange={e => setFilterStart(e.target.value)} style={{ ...DI, flex: 1 }} />
+                      <span style={{ color: "#475569", fontSize: 12 }}>to</span>
+                      <input type="date" value={filterEnd} onChange={e => setFilterEnd(e.target.value)} style={{ ...DI, flex: 1 }} />
                     </div>
                   )}
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4 }}>
-                    <span style={{ fontSize:11, color:"#475569" }}>{filtered.length} walk{filtered.length!==1?"s":""}</span>
-                    <button onClick={fetchWalks} style={{ border:"none", background:"none", color:"#3b82f6", fontSize:11, fontWeight:600, cursor:"pointer" }}>↻ Refresh</button>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+                    <span style={{ fontSize: 11, color: "#475569" }}>{filtered.length} walk{filtered.length !== 1 ? "s" : ""}</span>
+                    <button onClick={fetchWalks} style={{ border: "none", background: "none", color: "#3b82f6", fontSize: 11, fontWeight: 600, cursor: "pointer" }}>&#8635; Refresh</button>
                   </div>
                 </div>
 
                 {ds ? (
                   <>
-                    <div style={{ ...CD, display:"flex", justifyContent:"space-around", padding:20 }}>
+                    <div style={{ ...CD, display: "flex", justifyContent: "space-around", padding: 20 }}>
                       <ScoreRing pct={ds.avg} label="Overall" />
                       <ScoreRing pct={ds.avgEnd} size={72} stroke={6} label="Ends" />
                       <ScoreRing pct={ds.avgAisle} size={72} stroke={6} label="Aisles" />
                     </div>
-                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
-                      <div style={SC}><span style={SL}>Best Walk</span><span style={{...SV, color:pc(ds.best)}}>{ds.best}%</span></div>
-                      <div style={SC}><span style={SL}>Worst Walk</span><span style={{...SV, color:pc(ds.worst)}}>{ds.worst}%</span></div>
-                      <div style={SC}><span style={SL}>Metro Deductions</span><span style={{...SV, color:"#ef4444"}}>−{ds.totalMetro}</span></div>
-                      <div style={SC}><span style={SL}>Misc Deductions</span><span style={{...SV, color:"#ef4444"}}>−{ds.totalMisc}</span></div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <div style={SC}><span style={SL}>Best Walk</span><span style={{ ...SV, color: pc(ds.best) }}>{ds.best}%</span></div>
+                      <div style={SC}><span style={SL}>Worst Walk</span><span style={{ ...SV, color: pc(ds.worst) }}>{ds.worst}%</span></div>
+                      <div style={SC}><span style={SL}>Metro Deductions</span><span style={{ ...SV, color: "#ef4444" }}>&minus;{ds.totalMetro}</span></div>
+                      <div style={SC}><span style={SL}>Misc Deductions</span><span style={{ ...SV, color: "#ef4444" }}>&minus;{ds.totalMisc}</span></div>
                     </div>
+
+                    {/* Closer breakdown */}
+                    {closerStats && closerStats.length > 0 && (
+                      <div style={CD}>
+                        <span style={{ ...ST, marginBottom: 8, display: "block" }}>By Closer</span>
+                        {closerStats.map(c => (
+                          <div key={c.name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid #1e293b" }}>
+                            <div>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{c.name}</span>
+                              <span style={{ fontSize: 11, color: "#64748b", marginLeft: 8 }}>{c.walks} walk{c.walks !== 1 ? "s" : ""}</span>
+                            </div>
+                            <span style={{ fontSize: 16, fontWeight: 800, color: pc(c.avg), fontFamily: "'IBM Plex Mono', monospace" }}>{c.avg}%</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Frequent misses */}
+                    {freqMisses && (
+                      <div style={CD}>
+                        <span style={{ ...ST, marginBottom: 8, display: "block" }}>Repeat Misses</span>
+                        {freqMisses.map(([label, count]) => (
+                          <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "5px 0", borderBottom: "1px solid #1e293b" }}>
+                            <span style={{ fontSize: 13, color: "#e2e8f0" }}>{label}</span>
+                            <span style={{ fontSize: 14, fontWeight: 700, color: "#ef4444", fontFamily: "'IBM Plex Mono', monospace" }}>{count}x</span>
+                          </div>
+                        ))}
+                        <span style={{ fontSize: 10, color: "#475569", marginTop: 4 }}>Aggregated from noted misses in selected range</span>
+                      </div>
+                    )}
+
+                    {/* Trend */}
                     {filtered.length > 1 && (
                       <div style={CD}>
-                        <span style={{...ST, marginBottom:8, display:"block"}}>Trend</span>
-                        <TrendChart walks={[...filtered].sort((a,b) => a.date.localeCompare(b.date))} />
+                        <span style={{ ...ST, marginBottom: 8, display: "block" }}>Trend</span>
+                        <TrendChart walks={[...filtered].sort((a, b) => a.date.localeCompare(b.date))} />
                       </div>
                     )}
                   </>
                 ) : (
-                  <div style={{ color:"#64748b", textAlign:"center", padding:40 }}>No walks in range.</div>
+                  <div style={{ color: "#64748b", textAlign: "center", padding: 40 }}>No walks in range.</div>
                 )}
               </div>
             )}
@@ -507,46 +620,62 @@
     function WalkDetail({ walk, onBack, onEdit, onDelete, saving }) {
       const s = calcScore(walk);
       const [cd, setCd] = useState(false);
+
+      function DetailSection({ label, detail, score, max, pct }) {
+        return (
+          <div style={CD}>
+            <DRow label={label} val={max ? `${score}/${max}` : `\u2212${detail.length}`} sub={max ? `${pct}% \u00b7 ${detail.length} missed` : `${detail.length} not faced`} pct={max ? pct : (detail.length === 0 ? 100 : 30)} />
+            {detail.length > 0 && (
+              <div style={{ marginTop: 4 }}>
+                {detail.map((m, i) => (
+                  <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", padding: "3px 0" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", minWidth: 16, fontFamily: "'IBM Plex Mono', monospace" }}>{i + 1}</span>
+                    <span style={{ fontSize: 12, color: m.note ? "#e2e8f0" : "#475569" }}>{m.note || "(no note)"}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      }
+
       return (
-        <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-          <button onClick={onBack} style={{...SBT, width:"auto", alignSelf:"flex-start", padding:"6px 14px", fontSize:12}}>← Back</button>
-          <div style={{...CD, display:"flex", flexDirection:"column", alignItems:"center", gap:8, padding:20}}>
-            <span style={{ fontSize:14, fontWeight:600, color:"#94a3b8" }}>{fmt(walk.date)}</span>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <button onClick={onBack} style={{ ...SBT, width: "auto", alignSelf: "flex-start", padding: "6px 14px", fontSize: 12 }}>&larr; Back</button>
+          <div style={{ ...CD, display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: 20 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "#94a3b8" }}>{fmt(walk.date)}</span>
+            {walk.closedBy && <span style={{ fontSize: 12, color: "#64748b" }}>Closed by: <strong style={{ color: "#e2e8f0" }}>{walk.closedBy}</strong></span>}
             <ScoreRing pct={s.pct} size={110} stroke={8} />
-            <span style={{ fontSize:28, fontWeight:900, color:pc(s.pct), fontFamily:"'IBM Plex Mono', monospace" }}>{s.total}/{BASE_MAX}</span>
+            <span style={{ fontSize: 28, fontWeight: 900, color: pc(s.pct), fontFamily: "'IBM Plex Mono', monospace" }}>{s.total}/{BASE_MAX}</span>
           </div>
-          <div style={CD}>
-            <DRow label="Endcaps" val={`${s.endScore}/${MAX_ENDS}`} sub={`${s.endPct}% · ${walk.endsMissed} missed`} pct={s.endPct} />
-            {walk.endsComment && <p style={CM}>{walk.endsComment}</p>}
-          </div>
-          <div style={CD}>
-            <DRow label="Metro/Side Stacks" val={`−${s.metroDeduct}`} sub={`${walk.metroMissed} not faced`} pct={walk.metroMissed===0?100:30} />
-            {walk.metroComment && <p style={CM}>{walk.metroComment}</p>}
-          </div>
-          <div style={CD}>
-            <DRow label="Aisles" val={`${s.aisleScore}/${MAX_AISLES}`} sub={`${s.aislePct}% · ${walk.aislesMissed} missed`} pct={s.aislePct} />
-            {walk.aislesComment && <p style={CM}>{walk.aislesComment}</p>}
-          </div>
+
+          <DetailSection label="Endcaps" detail={walk.endsDetail || []} score={s.endScore} max={MAX_ENDS} pct={s.endPct} />
+          <DetailSection label="Metro & Side Stacks" detail={walk.metroDetail || []} />
+          <DetailSection label="Aisles" detail={walk.aislesDetail || []} score={s.aisleScore} max={MAX_AISLES} pct={s.aislePct} />
+
           {walk.misc?.some(m => m.active || m.text) && (
             <div style={CD}>
-              <span style={ST}>Misc Deductions (−{s.miscDeduct})</span>
-              {walk.misc.filter(m => m.active || m.text).map((m,i) => (
-                <div key={i} style={{ display:"flex", gap:8, alignItems:"center", marginTop:6 }}>
-                  {m.active && <span style={{ color:"#ef4444", fontWeight:700, fontSize:12 }}>−1</span>}
-                  <span style={{ color:"#94a3b8", fontSize:13 }}>{m.text || "(no note)"}</span>
+              <span style={ST}>Misc Deductions (&minus;{s.miscDeduct})</span>
+              {walk.misc.filter(m => m.active || m.text).map((m, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6 }}>
+                  {m.active && <span style={{ color: "#ef4444", fontWeight: 700, fontSize: 12 }}>&minus;1</span>}
+                  <span style={{ color: "#94a3b8", fontSize: 13 }}>{m.text || "(no note)"}</span>
                 </div>
               ))}
             </div>
           )}
-          <div style={{ display:"flex", gap:10, marginTop:4 }}>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
             <button onClick={onEdit} style={PB}>Edit</button>
             {!cd ? (
-              <button onClick={() => setCd(true)} style={{...SBT, borderColor:"#7f1d1d", color:"#ef4444"}}>Delete</button>
+              <button onClick={() => setCd(true)} style={{ ...SBT, borderColor: "#7f1d1d", color: "#ef4444" }}>Delete</button>
             ) : (
-              <button onClick={onDelete} disabled={saving} style={{...SBT, background:"rgba(239,68,68,0.15)", borderColor:"#ef4444", color:"#ef4444"}}>{saving?"...":"Confirm Delete"}</button>
+              <button onClick={onDelete} disabled={saving} style={{ ...SBT, background: "rgba(239,68,68,0.15)", borderColor: "#ef4444", color: "#ef4444" }}>
+                {saving ? "..." : "Confirm Delete"}
+              </button>
             )}
           </div>
-          <div style={{ height:40 }} />
+          <div style={{ height: 40 }} />
         </div>
       );
     }
@@ -554,11 +683,11 @@
     function DRow({ label, val, sub, pct }) {
       return (
         <div>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"baseline" }}>
-            <span style={{ fontSize:13, fontWeight:600, color:"#e2e8f0" }}>{label}</span>
-            <span style={{ fontSize:16, fontWeight:800, color:pc(pct), fontFamily:"'IBM Plex Mono', monospace" }}>{val}</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#e2e8f0" }}>{label}</span>
+            <span style={{ fontSize: 16, fontWeight: 800, color: pc(pct), fontFamily: "'IBM Plex Mono', monospace" }}>{val}</span>
           </div>
-          <span style={{ fontSize:11, color:"#64748b" }}>{sub}</span>
+          <span style={{ fontSize: 11, color: "#64748b" }}>{sub}</span>
           <MiniBar pct={pct} h={4} />
         </div>
       );
@@ -566,47 +695,47 @@
 
     // ─── Trend Chart ─────────────────────────────────────────────
     function TrendChart({ walks }) {
-      const W=320, H=120, P=28;
-      const sc = walks.map(w => ({ date:w.date, pct:calcScore(w).pct }));
+      const W = 320, H = 120, P = 28;
+      const sc = walks.map(w => ({ date: w.date, pct: calcScore(w).pct }));
       const n = sc.length;
-      const x = i => P + (i/Math.max(1,n-1)) * (W-P*2);
-      const y = v => H - P - (v/100) * (H-P*2);
-      const pts = sc.map((s,i) => `${x(i)},${y(s.pct)}`).join(" ");
+      const x = i => P + (i / Math.max(1, n - 1)) * (W - P * 2);
+      const y = v => H - P - (v / 100) * (H - P * 2);
+      const pts = sc.map((s, i) => `${x(i)},${y(s.pct)}`).join(" ");
       return (
-        <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%" }}>
-          {[0,25,50,75,100].map(v => (
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%" }}>
+          {[0, 25, 50, 75, 100].map(v => (
             <g key={v}>
-              <line x1={P} y1={y(v)} x2={W-P} y2={y(v)} stroke="#1e293b" strokeWidth={1} />
-              <text x={P-4} y={y(v)+3} textAnchor="end" fontSize={9} fill="#475569">{v}</text>
+              <line x1={P} y1={y(v)} x2={W - P} y2={y(v)} stroke="#1e293b" strokeWidth={1} />
+              <text x={P - 4} y={y(v) + 3} textAnchor="end" fontSize={9} fill="#475569">{v}</text>
             </g>
           ))}
-          <polygon points={`${P},${H-P} ${pts} ${W-P},${H-P}`} fill="rgba(59,130,246,0.08)" />
+          <polygon points={`${P},${H - P} ${pts} ${W - P},${H - P}`} fill="rgba(59,130,246,0.08)" />
           <polyline points={pts} fill="none" stroke="#3b82f6" strokeWidth={2} strokeLinejoin="round" />
-          {sc.map((s,i) => (
+          {sc.map((s, i) => (
             <g key={i}>
               <circle cx={x(i)} cy={y(s.pct)} r={4} fill={pc(s.pct)} stroke="#0f172a" strokeWidth={2} />
-              {n<=14 && <text x={x(i)} y={H-4} textAnchor="middle" fontSize={8} fill="#475569">{fmtShort(s.date)}</text>}
+              {n <= 14 && <text x={x(i)} y={H - 4} textAnchor="middle" fontSize={8} fill="#475569">{fmtShort(s.date)}</text>}
             </g>
           ))}
         </svg>
       );
     }
 
-    // ─── Style constants ─────────────────────────────────────────
-    const SH = { fontFamily:"'DM Sans', -apple-system, sans-serif", background:"#0f172a", color:"#e2e8f0", height:"100%", display:"flex", flexDirection:"column", maxWidth:480, margin:"0 auto" };
-    const CD = { background:"#0f172a", border:"1px solid #1e293b", borderRadius:12, padding:14, display:"flex", flexDirection:"column", gap:8 };
-    const ST = { fontSize:14, fontWeight:700, color:"#e2e8f0" };
-    const LB = { fontSize:12, fontWeight:600, color:"#94a3b8", marginBottom:2 };
-    const TG = { fontSize:12, fontWeight:700, padding:"3px 8px", borderRadius:6, fontFamily:"'IBM Plex Mono', monospace" };
-    const DI = { background:"#1e293b", border:"1px solid #334155", borderRadius:8, padding:"8px 12px", color:"#e2e8f0", fontSize:14, colorScheme:"dark", width:"100%" };
-    const TA = { background:"#1e293b", border:"1px solid #334155", borderRadius:8, padding:"8px 12px", color:"#e2e8f0", fontSize:13, fontFamily:"inherit" };
-    const PB = { flex:1, padding:"14px 0", borderRadius:10, border:"none", background:"#3b82f6", color:"#fff", fontSize:14, fontWeight:700, cursor:"pointer" };
-    const SBT = { flex:1, padding:"14px 0", borderRadius:10, border:"1px solid #334155", background:"transparent", color:"#94a3b8", fontSize:14, fontWeight:600, cursor:"pointer" };
-    const HR = { background:"#0f172a", border:"1px solid #1e293b", borderRadius:10, padding:12, display:"flex", flexDirection:"column", gap:4, cursor:"pointer", textAlign:"left", width:"100%" };
-    const SC = { background:"#0f172a", border:"1px solid #1e293b", borderRadius:10, padding:12, display:"flex", flexDirection:"column", gap:4 };
-    const SL = { fontSize:11, color:"#64748b", textTransform:"uppercase", letterSpacing:0.5 };
-    const SV = { fontSize:20, fontWeight:800, fontFamily:"'IBM Plex Mono', monospace" };
-    const CM = { fontSize:12, color:"#94a3b8", margin:"4px 0 0", fontStyle:"italic", lineHeight:1.4 };
+    // ─── Styles ──────────────────────────────────────────────────
+    const SH = { fontFamily: "'DM Sans', -apple-system, sans-serif", background: "#0f172a", color: "#e2e8f0", height: "100%", display: "flex", flexDirection: "column", maxWidth: 480, margin: "0 auto" };
+    const CD = { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 8 };
+    const ST = { fontSize: 14, fontWeight: 700, color: "#e2e8f0" };
+    const LB = { fontSize: 12, fontWeight: 600, color: "#94a3b8", marginBottom: 2, display: "block" };
+    const TG = { fontSize: 12, fontWeight: 700, padding: "3px 8px", borderRadius: 6, fontFamily: "'IBM Plex Mono', monospace" };
+    const DI = { background: "#1e293b", border: "1px solid #334155", borderRadius: 8, padding: "8px 12px", color: "#e2e8f0", fontSize: 14, colorScheme: "dark" };
+    const TA = { background: "#1e293b", border: "1px solid #334155", borderRadius: 8, padding: "8px 12px", color: "#e2e8f0", fontSize: 13, fontFamily: "inherit" };
+    const PB = { flex: 1, padding: "14px 0", borderRadius: 10, border: "none", background: "#3b82f6", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer" };
+    const SBT = { flex: 1, padding: "14px 0", borderRadius: 10, border: "1px solid #334155", background: "transparent", color: "#94a3b8", fontSize: 14, fontWeight: 600, cursor: "pointer" };
+    const HR = { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 4, cursor: "pointer", textAlign: "left", width: "100%" };
+    const SC = { background: "#0f172a", border: "1px solid #1e293b", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 4 };
+    const SL = { fontSize: 11, color: "#64748b", textTransform: "uppercase", letterSpacing: 0.5 };
+    const SV = { fontSize: 20, fontWeight: 800, fontFamily: "'IBM Plex Mono', monospace" };
+    const CM = { fontSize: 12, color: "#94a3b8", margin: "4px 0 0", fontStyle: "italic", lineHeight: 1.4 };
 
     ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
